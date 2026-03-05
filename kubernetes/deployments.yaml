@@ -1,0 +1,435 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: call-orchestrator
+  namespace: telco
+  labels:
+    app: call-orchestrator
+    version: "1.0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: call-orchestrator }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels:
+        app: call-orchestrator
+        version: "1.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: { app: call-orchestrator }
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: orchestrator
+          image: ghcr.io/telco/call-orchestrator:latest
+          ports:
+            - { containerPort: 8080, name: http }
+            - { containerPort: 50051, name: grpc }
+          envFrom:
+            - configMapRef: { name: telco-config }
+            - secretRef:    { name: telco-secrets }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits:   { cpu: 1000m, memory: 1Gi }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: call-orchestrator
+  namespace: telco
+spec:
+  selector: { app: call-orchestrator }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+    - { name: grpc, port: 50051, targetPort: 50051 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asr-service
+  namespace: telco
+  labels:
+    app: asr-service
+spec:
+  replicas: 4
+  selector:
+    matchLabels: { app: asr-service }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 2, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels:
+        app: asr-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+    spec:
+      nodeSelector: { workload: ml }
+      tolerations:
+        - { key: workload, operator: Equal, value: ml, effect: NoSchedule }
+      containers:
+        - name: asr
+          image: ghcr.io/telco/asr-service:latest
+          ports:
+            - { containerPort: 8001, name: http }
+          env:
+            - name: PORT
+              value: "8001"
+            - name: WORKERS
+              value: "1"
+          envFrom:
+            - configMapRef: { name: telco-config }
+            - secretRef:    { name: telco-secrets }
+          resources:
+            requests: { cpu: 1000m, memory: 2Gi }
+            limits:   { cpu: 4000m, memory: 8Gi }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8001 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8001 }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: asr-service
+  namespace: telco
+spec:
+  selector: { app: asr-service }
+  ports:
+    - { name: http, port: 8001, targetPort: 8001 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intelligence-service
+  namespace: telco
+  labels:
+    app: intelligence-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: intelligence-service }
+  template:
+    metadata:
+      labels:
+        app: intelligence-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+    spec:
+      nodeSelector: { workload: ml }
+      tolerations:
+        - { key: workload, operator: Equal, value: ml, effect: NoSchedule }
+      containers:
+        - name: intelligence
+          image: ghcr.io/telco/intelligence-service:latest
+          ports:
+            - { containerPort: 8002, name: http }
+          env:
+            - name: PORT
+              value: "8002"
+          envFrom:
+            - configMapRef: { name: telco-config }
+            - secretRef:    { name: telco-secrets }
+          resources:
+            requests: { cpu: 2000m, memory: 4Gi }
+            limits:   { cpu: 8000m, memory: 16Gi }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8002 }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8002 }
+            initialDelaySeconds: 45
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: intelligence-service
+  namespace: telco
+spec:
+  selector: { app: intelligence-service }
+  ports:
+    - { name: http, port: 8002, targetPort: 8002 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routing-service
+  namespace: telco
+  labels:
+    app: routing-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: routing-service }
+  template:
+    metadata:
+      labels:
+        app: routing-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: routing
+          image: ghcr.io/telco/routing-service:latest
+          ports:
+            - { containerPort: 8080, name: http }
+          envFrom:
+            - configMapRef: { name: telco-config }
+            - secretRef:    { name: telco-secrets }
+          resources:
+            requests: { cpu: 200m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: routing-service
+  namespace: telco
+spec:
+  selector: { app: routing-service }
+  ports:
+    - { name: http, port: 8004, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recording-service
+  namespace: telco
+  labels:
+    app: recording-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: recording-service }
+  template:
+    metadata:
+      labels:
+        app: recording-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: recording
+          image: ghcr.io/telco/recording-service:latest
+          ports:
+            - { containerPort: 8080, name: http }
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: prod-telco-recordings
+          envFrom:
+            - configMapRef: { name: telco-config }
+            - secretRef:    { name: telco-secrets }
+          resources:
+            requests: { cpu: 300m, memory: 512Mi }
+            limits:   { cpu: 1000m, memory: 2Gi }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recording-service
+  namespace: telco
+spec:
+  selector: { app: recording-service }
+  ports:
+    - { name: http, port: 8005, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cti-service
+  namespace: telco
+  labels:
+    app: cti-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: cti-service }
+  template:
+    metadata:
+      labels:
+        app: cti-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: cti
+          image: ghcr.io/telco/cti-service:latest
+          ports:
+            - { containerPort: 8080, name: http }
+          envFrom:
+            - configMapRef: { name: telco-config }
+            - secretRef:    { name: telco-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cti-service
+  namespace: telco
+spec:
+  selector: { app: cti-service }
+  ports:
+    - { name: http, port: 8006, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+  namespace: telco
+  labels:
+    app: analytics-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: analytics-service }
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8008"
+    spec:
+      containers:
+        - name: analytics
+          image: ghcr.io/telco/analytics-service:latest
+          ports:
+            - { containerPort: 8008, name: http }
+          env:
+            - name: PORT
+              value: "8008"
+          envFrom:
+            - configMapRef: { name: telco-config }
+            - secretRef:    { name: telco-secrets }
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits:   { cpu: 1000m, memory: 1Gi }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8008 }
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-service
+  namespace: telco
+spec:
+  selector: { app: analytics-service }
+  ports:
+    - { name: http, port: 8008, targetPort: 8008 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: telco
+  labels:
+    app: api-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: api-gateway }
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8100"
+    spec:
+      containers:
+        - name: kong
+          image: kong:3.5
+          ports:
+            - { containerPort: 8000, name: proxy }
+            - { containerPort: 8443, name: proxy-ssl }
+            - { containerPort: 8100, name: status }
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /etc/kong/kong.yml
+            - name: KONG_PROXY_LISTEN
+              value: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+            - name: KONG_LOG_LEVEL
+              value: warn
+            - name: KONG_PLUGINS
+              value: "bundled,prometheus"
+          volumeMounts:
+            - name: kong-config
+              mountPath: /etc/kong
+              readOnly: true
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits:   { cpu: 2000m, memory: 1Gi }
+          livenessProbe:
+            httpGet: { path: /status, port: 8100 }
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /status, port: 8100 }
+            periodSeconds: 10
+      volumes:
+        - name: kong-config
+          configMap:
+            name: kong-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: telco
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+spec:
+  type: LoadBalancer
+  selector: { app: api-gateway }
+  ports:
+    - { name: http, port: 80, targetPort: 8000 }
+    - { name: https, port: 443, targetPort: 8443 }

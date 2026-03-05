@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: telco-local
+
+scrape_configs:
+  - job_name: call-orchestrator
+    static_configs:
+      - targets: ["call-orchestrator:8080"]
+    metrics_path: /metrics
+
+  - job_name: routing-service
+    static_configs:
+      - targets: ["routing-service:8080"]
+    metrics_path: /metrics
+
+  - job_name: recording-service
+    static_configs:
+      - targets: ["recording-service:8080"]
+    metrics_path: /metrics
+
+  - job_name: cti-service
+    static_configs:
+      - targets: ["cti-service:8080"]
+    metrics_path: /metrics
+
+  - job_name: asr-service
+    static_configs:
+      - targets: ["asr-service:8001"]
+    metrics_path: /metrics
+
+  - job_name: intelligence-service
+    static_configs:
+      - targets: ["intelligence-service:8002"]
+    metrics_path: /metrics
+
+  - job_name: analytics-service
+    static_configs:
+      - targets: ["analytics-service:8008"]
+    metrics_path: /metrics
+
+  - job_name: api-gateway-kong
+    static_configs:
+      - targets: ["api-gateway:8100"]
+    metrics_path: /metrics
